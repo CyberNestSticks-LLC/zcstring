@@ -1,0 +1,22 @@
+[package]
+categories = ["data-structures", "parsing", "memory-management"]
+description = "High-performance zero-copy string handles for Serde, backed by arcstr."
+edition = "2021"
+homepage = "https://github.com/CyberNestSticks-LLC/zcstring.git"
+keywords = ["zero-copy", "serde", "json", "arcstr", "zero-allocation"]
+license = "MIT OR Apache-2.0"
+name = "zcstring"
+readme = "README.md"
+repository = "https://github.com/CyberNestSticks-LLC/zcstring.git"
+rust-version = "1.68"
+version = "0.1.0"
+
+[dependencies]
+arcstr = { version = "1.2", default-features = false, features = ["substr"] }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[features]
+default = ["std", "serde"]
+std = ["arcstr/std"]
+serde = ["arcstr/serde", "dep:serde", "dep:serde_json"]
