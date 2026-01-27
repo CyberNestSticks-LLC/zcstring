@@ -8,19 +8,18 @@
 // Author: Lawrence (Larry) Foard
 
 use arcstr::literal;
-#[cfg(feature = "serde")]
+#[cfg(feature = "serde_json")]
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::mem::size_of;
 
-#[cfg(feature = "serde")]
+#[cfg(feature = "serde_json")]
 use zcstring::serde_json_from_zcstring;
 use zcstring::ZCString;
 
 // parse JSON containing borrowed pointers to ParsedLog::owner
 // and/or owned de-escapified data
 #[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "serde_json", derive(Deserialize, Serialize))]
 struct LogEntry {
     level: ZCString,
     message: ZCString,
@@ -46,21 +45,7 @@ fn show(label: &str, source: &str, s: &str) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // ZCString creation
-    println!("From str: {:?}", ZCString::from("str"));
-    #[cfg(feature = "std")]
-    println!("From String: {:?}", ZCString::from(String::from("str")));
-    println!("New ZCString: {:?}", ZCString::new());
-
-    // how big is a ZCString member in a structure as compared &str?
-
-    // we expect the same size. Why? &str is a fat pointer and
-    // ZString is a Substr which is a thin pointer to an ArcStr plus
-    // a range consisting of two u32s
-    println!("size_of &str: {}", size_of::<&str>());
-    println!("size_of ZCString: {}", size_of::<ZCString>());
-
-    #[cfg(feature = "serde")]
+    #[cfg(feature = "serde_json")]
     {
         // example JSON data feed
         let input = [

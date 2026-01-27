@@ -27,7 +27,7 @@ this by:
 
 
 
-## Features
+## Capabilities
 
 * **Zero-allocation**: Sub-slices share the same reference-counted buffer as
   the parent `ArcStr`.
@@ -43,7 +43,7 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 # by default the std and serde features are enable
-zcstring = "0.1.0"
+zcstring = "0.2.0"
 
 ## Example code
-cargo run --example simple_example
+cargo run --example json_example
