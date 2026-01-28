@@ -406,9 +406,7 @@ pub fn serde_json_from_zcstring<T>(json: ZCString) -> Result<T, serde_json::Erro
 where
     T: for<'de> Deserialize<'de>,
 {
-    ZCString::with_source(json, |j| {
-        serde_json::from_str::<T>(&j)
-    })
+    ZCString::with_source(json, |j| serde_json::from_str::<T>(&j))
 }
 
 /// str iterator wrapper automatically converts &str to ZCString
