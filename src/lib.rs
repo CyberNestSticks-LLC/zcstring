@@ -58,7 +58,6 @@ use arcstr::{literal, ArcStr, Substr};
 #[cfg(feature = "serde_json")]
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
-use std::error::Error;
 use std::ops::Deref;
 use std::ops::RangeBounds;
 
@@ -403,13 +402,13 @@ impl<'de> Deserialize<'de> for ZCString {
 ///
 /// **Requires the `serde` feature.**
 #[cfg(feature = "serde_json")]
-pub fn serde_json_from_zcstring<T>(json: ZCString) -> Result<T, Box<dyn Error>>
+pub fn serde_json_from_zcstring<T>(json: ZCString) -> Result<T, serde_json::Error>
 where
     T: for<'de> Deserialize<'de>,
 {
-    Ok(ZCString::with_source(json, |j| {
+    ZCString::with_source(json, |j| {
         serde_json::from_str::<T>(&j)
-    })?)
+    })
 }
 
 /// str iterator wrapper automatically converts &str to ZCString
