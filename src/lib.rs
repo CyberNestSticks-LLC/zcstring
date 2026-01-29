@@ -58,13 +58,30 @@ use arcstr::{literal, ArcStr, Substr};
 #[cfg(feature = "serde_json")]
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
+#[cfg(feature = "std")]
+use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
-use std::ops::RangeBounds;
+#[cfg(feature = "std")]
+use std::ops::{Bound, RangeBounds};
 
 thread_local! {
     /// The thread-local storage holding the current active source string.
     static SOURCE: RefCell<Option<ZCString>> =
         const { RefCell::new(None) };
+}
+
+// error for File, Read and Seek operations
+#[cfg(feature = "std")]
+#[derive(thiserror::Error, Debug)]
+pub enum ReaderError {
+    #[error("Invalid range: start {start} is greater than end {end}")]
+    InvalidRange { start: u64, end: u64 },
+
+    #[error("IO failure: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("UTF-8 encoding failure: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
 }
 
 /// ZCString wrapper struct
@@ -249,6 +266,127 @@ impl ZCString {
             inner: f(self.as_str()),
             _marker: std::marker::PhantomData,
         }
+    }
+
+    #[cfg(feature = "std")]
+    /// Create a ZCString by reading a range of bytes from a
+    /// an object supporting Read and Seek traits. The range must
+    /// contain valid UTF-8
+    ///
+    /// ### Arguments
+    /// ```
+    /// # use std::io::Cursor;
+    /// # use zcstring::ZCString;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// // test data in a form that supports Read & Seek traits
+    /// // as if coming from a File
+    /// let mut data = Cursor::new(b"Cats and dogs");
+    /// // read "and" from 'data'
+    /// let mut r = ZCString::read_range(&mut data, 5..8)?;
+    /// assert_eq!(r, "and");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn read_range<I, R>(input: &mut I, range: R) -> Result<ZCString, ReaderError>
+    where
+        I: Read + Seek,
+        R: RangeBounds<u64>,
+    {
+        let start_pos = match range.start_bound() {
+            Bound::Included(s) => *s,
+            Bound::Excluded(s) => *s + 1,
+            Bound::Unbounded => input.stream_position()?,
+        };
+
+        let end_pos = match range.end_bound() {
+            Bound::Included(e) => *e + 1,
+            Bound::Excluded(e) => *e,
+            Bound::Unbounded => input.seek(SeekFrom::End(0))?,
+        };
+
+        if start_pos > end_pos {
+            // error
+            return Err(ReaderError::InvalidRange {
+                start: start_pos,
+                end: end_pos,
+            });
+        }
+
+        if start_pos == end_pos {
+            // edge case
+            return Ok(ZCString::new());
+        }
+
+        let mut io_error = Ok(());
+
+        let result = ArcStr::init_with((end_pos - start_pos) as usize, |buffer| {
+            io_error = (|| -> Result<(), std::io::Error> {
+                input.seek(SeekFrom::Start(start_pos))?;
+                input.read_exact(buffer)?;
+                Ok(())
+            })()
+        })?;
+
+        match io_error {
+            Ok(()) => Ok(ZCString::from(result)),
+            Err(e) => Err(e)?,
+        }
+    }
+
+    #[cfg(feature = "std")]
+    /// Create a ZCString by reading bytes from an object supporting the Read trait.
+    /// The bytes must be valid UTF-8
+    ///
+    /// ### Arguments
+    /// ```
+    /// # use std::io::Cursor;
+    /// # use zcstring::ZCString;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// // test data in a form that supports Read & Seek traits
+    /// // as if coming from a File
+    /// let mut data = Cursor::new(b"Cats and dogs");
+    /// // read "and" from 'data'
+    /// let mut r = ZCString::read(&mut data, 4)?;
+    /// assert_eq!(r, "Cats");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn read<I: Read>(input: &mut I, bytes: usize) -> Result<ZCString, ReaderError> {
+        let mut io_error = Ok(());
+
+        let result = ArcStr::init_with(bytes, |buffer| {
+            io_error = (|| -> Result<(), std::io::Error> {
+                input.read_exact(buffer)?;
+                Ok(())
+            })()
+        })?;
+
+        match io_error {
+            Ok(()) => Ok(ZCString::from(result)),
+            Err(e) => Err(e)?,
+        }
+    }
+
+    #[cfg(feature = "std")]
+    /// Create a ZCString by reading an entire file
+    ///
+    /// ### Arguments
+    /// ```
+    /// # use zcstring::ZCString;
+    /// # use std::path::PathBuf;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// // Construct path relative to the project root
+    /// let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    /// path.push("examples");
+    /// path.push("from_file_test.txt");
+    /// let r = ZCString::from_file(path)?;
+    /// assert_eq!(&r, "xyzzy");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<ZCString, ReaderError> {
+        let mut handle = std::fs::File::open(path)?;
+        Self::read_range(&mut handle, 0..)
     }
 }
 
