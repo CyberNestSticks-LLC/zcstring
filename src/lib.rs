@@ -414,6 +414,20 @@ impl PartialEq<ZCString> for &str {
     }
 }
 
+#[cfg(feature = "std")]
+impl PartialEq<String> for ZCString {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == *other
+    }
+}
+
+#[cfg(feature = "std")]
+impl PartialEq<ZCString> for String {
+    fn eq(&self, other: &ZCString) -> bool {
+        *self == other.0
+    }
+}
+
 impl Deref for ZCString {
     type Target = Substr;
 

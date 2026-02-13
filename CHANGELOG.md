@@ -11,3 +11,8 @@ All notable changes to this project will be documented in this file.
 -  ZCString::read_range([Read + Seek], [start], [end])
 -  ZCString::read_exact([impl Read], [bytes])
 -  ZCString::read_upto([impl Read], [bytes])
+
+## [0.3.1] - 2026-01-13
+### Added
+
+- Support for PartialEq to String
