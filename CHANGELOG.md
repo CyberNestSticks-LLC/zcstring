@@ -21,3 +21,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Re-export Arcstr literal macro
+
+## [0.3.3] - 2026-09-29
+### Added
+
+- Re-export Arcstr literal_substr macro
+- const constructors of empty and const substr derived ZCString

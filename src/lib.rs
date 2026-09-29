@@ -56,7 +56,7 @@
 
 use arcstr::{ArcStr, Substr};
 // re-export
-pub use arcstr::literal;
+pub use arcstr::{literal, literal_substr};
 #[cfg(feature = "serde_json")]
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
@@ -93,8 +93,13 @@ pub struct ZCString(Substr);
 
 impl ZCString {
     /// Creates a new, empty `ZCString`.
-    pub fn new() -> Self {
-        ZCString::from(literal!(""))
+    pub const fn new() -> Self {
+        ZCString(literal_substr!(""))
+    }
+
+    /// short hand to wrap literal_substr!("...")
+    pub const fn l(v: Substr) -> Self {
+        ZCString(v)
     }
 
     /// Create an independent allocated copy of the underlying string
@@ -102,6 +107,9 @@ impl ZCString {
     ///
     /// ```
     /// # use zcstring::ZCString;
+    /// # use arcstr::literal_substr;
+    /// const EMPTY: ZCString = ZCString::new();
+    /// const X: ZCString = ZCString::l(literal_substr!("x"));
     /// let large_source = ZCString::from_str_without_source("..."); // 1GB string
     /// let small_slice = large_source.substr(0..2);
     ///
