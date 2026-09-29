@@ -54,7 +54,9 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use arcstr::{literal, ArcStr, Substr};
+use arcstr::{ArcStr, Substr};
+// re-export
+pub use arcstr::literal;
 #[cfg(feature = "serde_json")]
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;

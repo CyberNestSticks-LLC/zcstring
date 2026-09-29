@@ -16,3 +16,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Support for PartialEq to String
+
+## [0.3.2] - 2026-09-29
+### Added
+
+- Re-export Arcstr literal macro
