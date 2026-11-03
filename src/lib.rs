@@ -58,7 +58,9 @@ use arcstr::{ArcStr, Substr};
 // re-export
 pub use arcstr::{literal, literal_substr};
 #[cfg(feature = "serde_json")]
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::ser::Error;
+use serde_json::value::RawValue;
 use std::cell::RefCell;
 #[cfg(feature = "std")]
 use std::io::{Read, Seek, SeekFrom};
@@ -591,5 +593,65 @@ where
         self.inner
             .next()
             .map(|slice| self.source.from_substr(slice))
+    }
+}
+
+/// ZCRawValue serde type that contains an internal ZCString
+/// allows convient retrieval of raw JSON 
+///
+/// ```
+/// # use zcstring::{ZCRawValue, ZCString, serde_json_from_zcstring};
+/// # use arcstr::literal_substr;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// const EMPTY: ZCString = ZCString::new();
+/// const json: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[\"a\", \"b\", 3]}"));
+/// #[derive(serde::Deserialize)]
+/// struct X {
+///     a: ZCString,
+///     c: ZCRawValue,
+/// }
+/// let x: X = serde_json_from_zcstring(json)?;
+/// assert_eq!(x.c.get(), "[\"a\", \"b\", 3]");
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "serde_json")]
+pub struct ZCRawValue(ZCString);
+
+impl ZCRawValue {
+    pub fn get(&self) -> &ZCString {
+        &self.0
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl std::fmt::Debug for ZCRawValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0.as_str(), f)
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<'de> Deserialize<'de> for ZCRawValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw_val: &'de RawValue = 
+            Deserialize::deserialize(deserializer)?;
+
+        Ok(ZCRawValue(ZCString::from_str_with_source(raw_val.get())))
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl Serialize for ZCRawValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {    
+        let raw = serde_json::from_str::<&serde_json::value::RawValue>(self.0.as_str())
+            .map_err(S::Error::custom)?;
+        raw.serialize(serializer)
     }
 }

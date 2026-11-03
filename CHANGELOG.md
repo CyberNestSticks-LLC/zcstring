@@ -27,3 +27,9 @@ All notable changes to this project will be documented in this file.
 
 - Re-export Arcstr literal_substr macro
 - const constructors of empty and const substr derived ZCString
+
+## [0.3.4] - 2026-11-03
+### Added
+
+- ZCRawValue type that behaves like an easier to use RawValue
+- capturing raw JSON values.

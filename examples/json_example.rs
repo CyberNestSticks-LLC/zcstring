@@ -14,7 +14,7 @@ use std::error::Error;
 
 #[cfg(feature = "serde_json")]
 use zcstring::serde_json_from_zcstring;
-use zcstring::ZCString;
+use zcstring::{ZCRawValue, ZCString};
 
 // parse JSON containing borrowed pointers to ParsedLog::owner
 // and/or owned de-escapified data
@@ -23,6 +23,7 @@ use zcstring::ZCString;
 struct LogEntry {
     level: ZCString,
     message: ZCString,
+    raw: ZCRawValue,
 }
 
 fn show(label: &str, source: &str, s: &str) {
@@ -49,13 +50,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     {
         // example JSON data feed
         let input = [
-            literal!(r#"{"level": "error", "message": "Connection lost"}"#),
-            literal!(r#"{"level": "warning", "message": "Cat on keyboard"}"#),
-            literal!(r#"{"level": "info", "message": "Crow pecked camera"}"#),
-            literal!(r#"{"level": "error", "message": "Raven pecked camera, now offline"}"#),
+            literal!(r#"{"level": "error", "message": "Connection lost", "raw": [1,2,3]}"#),
+            literal!(r#"{"level": "warning", "message": "Cat on keyboard", "raw": null}"#),
+            literal!(r#"{"level": "info", "message": "Crow pecked camera", "raw": {"a":"b"}}"#),
+            literal!(r#"{"level": "error", "message": "Raven pecked camera, now offline", "raw":null}"#),
             // in this case the address of message should not fall within
             // the memory address range of the raw json
-            literal!(r#"{"level": "error", "message": "Escaped \" "}"#),
+            literal!(r#"{"level": "error", "message": "Escaped \" ", "raw":"a\"bc"}"#),
         ];
 
         let items = input
@@ -76,6 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 show("level", &line, &entry.level);
                 show("message", &line, &entry.message);
+                show("raw", &line, &entry.raw.get());
 
                 // now serialize - Ok we could do a zero-alloc deserialize but
                 //                 not right now...
