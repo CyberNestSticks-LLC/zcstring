@@ -33,3 +33,9 @@ All notable changes to this project will be documented in this file.
 
 - ZCRawValue type that behaves like an easier to use RawValue
 - capturing raw JSON values.
+
+## [0.3.5] - 2026-11-03
+### Added
+
+- ZCRawValue really should support clone
+

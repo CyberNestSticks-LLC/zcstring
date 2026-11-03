@@ -616,6 +616,7 @@ where
 /// # }
 /// ```
 #[cfg(feature = "serde_json")]
+#[derive(Clone)]
 pub struct ZCRawValue(ZCString);
 
 impl ZCRawValue {
