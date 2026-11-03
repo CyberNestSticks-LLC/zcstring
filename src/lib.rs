@@ -59,14 +59,24 @@ use arcstr::{ArcStr, Substr};
 pub use arcstr::{literal, literal_substr};
 #[cfg(feature = "serde_json")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+#[cfg(feature = "serde_json")]
+use serde::de::{DeserializeOwned};
 use serde::ser::Error;
 use serde_json::value::RawValue;
 use std::cell::RefCell;
+#[cfg(feature = "serde_json")]
+use std::cmp::Ordering;
+#[cfg(feature = "serde_json")]
+use std::fmt::{self, Debug};
+#[cfg(feature = "serde_json")]
+use std::hash::{Hash, Hasher};
 #[cfg(feature = "std")]
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
 #[cfg(feature = "std")]
 use std::ops::{Bound, RangeBounds};
+
+
 
 thread_local! {
     /// The thread-local storage holding the current active source string.
@@ -616,7 +626,7 @@ where
 /// # }
 /// ```
 #[cfg(feature = "serde_json")]
-#[derive(Clone)]
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ZCRawValue(ZCString);
 
 impl ZCRawValue {
@@ -654,5 +664,151 @@ impl Serialize for ZCRawValue {
         let raw = serde_json::from_str::<&serde_json::value::RawValue>(self.0.as_str())
             .map_err(S::Error::custom)?;
         raw.serialize(serializer)
+    }
+}
+
+/// ZCRawValueAnd serde type that contains both a ZCRawValue and a generic
+///               type
+///
+/// ```
+/// # use zcstring::{ZCRawValueAnd, ZCString, serde_json_from_zcstring};
+/// # use arcstr::literal_substr;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// const EMPTY: ZCString = ZCString::new();
+/// const json: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, 2,  3]}"));
+/// #[derive(serde::Deserialize)]
+/// struct X {
+///     a: ZCString,
+///     c: ZCRawValueAnd<Vec<u32>>,
+/// }
+/// let x: X = serde_json_from_zcstring(json)?;
+/// assert_eq!(x.c.get_raw(), "[1, 2,  3]");
+/// assert_eq!(x.c.get_data().as_slice(), [1, 2, 3]);
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "serde_json")]
+pub struct ZCRawValueAnd<T> {
+    raw: ZCRawValue,
+    data: T,
+}
+
+#[cfg(feature = "serde_json")]
+impl<T> ZCRawValueAnd<T> {
+    pub fn get_raw(&self) -> &ZCString {
+        &self.raw.get()
+    }
+
+    pub fn get_data(&self) -> &T {
+        &self.data
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T> Deref for ZCRawValueAnd<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<'de, T: DeserializeOwned> Deserialize<'de> for ZCRawValueAnd<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw: ZCRawValue = 
+            Deserialize::deserialize(deserializer)?;
+            
+        // now deserialize the data component from our raw string
+        // raw is a substring of our data source, we don't need
+        // to re-specify it.
+        let data =
+            serde_json::from_str(raw.get().as_str())
+            .map_err(serde::de::Error::custom)?;
+
+        Ok(ZCRawValueAnd {
+            raw,
+            data,
+        })
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: Serialize> Serialize for ZCRawValueAnd<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // just send back the raw version
+        self.raw.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: fmt::Debug> fmt::Debug for ZCRawValueAnd<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.data, f)
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: fmt::Display> fmt::Display for ZCRawValueAnd<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.data, f)
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: Clone> Clone for ZCRawValueAnd<T> {
+    fn clone(&self) -> Self {
+        Self {
+            raw: self.raw.clone(),
+            data: self.data.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: PartialEq> PartialEq for ZCRawValueAnd<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.data.eq(&other.data)
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: Eq> Eq for ZCRawValueAnd<T> {}
+
+#[cfg(feature = "serde_json")]
+impl<T: PartialOrd> PartialOrd for ZCRawValueAnd<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.data.partial_cmp(&other.data)
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: Ord> Ord for ZCRawValueAnd<T> {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.data.cmp(&other.data)
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: Hash> Hash for ZCRawValueAnd<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: Default> Default for ZCRawValueAnd<T> {
+    fn default() -> Self {
+        Self {
+            raw: ZCRawValue::default(),
+            data: T::default(),
+        }
     }
 }

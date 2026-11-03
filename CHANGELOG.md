@@ -39,3 +39,8 @@ All notable changes to this project will be documented in this file.
 
 - ZCRawValue really should support clone
 
+## [0.3.6] - 2026-11-03
+### Added
+
+- ZCRawValueAnd really should support clone
+
