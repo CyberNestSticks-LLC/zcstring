@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 show("level", &line, &entry.level);
                 show("message", &line, &entry.message);
-                show("raw", &line, &entry.raw.get());
+                show("raw", &line, &entry.raw.value());
 
                 // now serialize - Ok we could do a zero-alloc deserialize but
                 //                 not right now...

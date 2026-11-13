@@ -44,3 +44,12 @@ All notable changes to this project will be documented in this file.
 
 - ZCRawValueAnd really should support clone
 
+## [0.4.0] - 2026-11-13
+### Changed 
+- Changed "data" to "value" in ZCRawValueAnd
+
+### Added
+- ZCLazyValue
+Similar to ZCRawValueAnd except the raw ZCString is parsed in a Lazy
+manner
+
