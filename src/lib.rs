@@ -826,6 +826,7 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// #[derive(serde::Deserialize)]
 /// struct X {
 ///     a: ZCString,
+///     #[serde(default)]
 ///     c: ZCLazyValue<Vec<u32>>,
 /// }
 ///
@@ -839,6 +840,11 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// const json2: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, \"BAD\", 3]}"));
 /// let x2: X = serde_json_from_zcstring(json2)?;
 /// assert!(x2.c.as_ref().is_none());
+///
+/// // JSON with missing "c"
+/// const json3: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\"}"));
+/// let x3: X = serde_json_from_zcstring(json3)?;
+/// assert!(x3.c.as_ref().is_none());
 ///
 /// # Ok(())
 /// # }
@@ -870,12 +876,8 @@ impl<T: for<'de> Deserialize<'de>> ZCLazyValue<T> {
     }
 
     // value as a Result, Ok(t) if successfully decoded
-    pub fn try_value(&self) -> Result<&T, &Arc<serde_json::Error>> {
-        match self.get_or_init() {
-            Ok(Some(t)) => Ok(t),
-            Err(e) => Err(e),
-            Ok(None) => unreachable!("We don't build Ok(None)"),
-        }
+    pub fn try_value(&self) -> Result<&Option<T>, &Arc<serde_json::Error>> {
+        self.get_or_init().as_ref()
     }
 
     // value as an option, Some(t) on successful decode
@@ -1000,12 +1002,13 @@ impl<T: for<'de> Deserialize<'de> + Hash> Hash for ZCLazyValue<T> {
     }
 }
 
+// default is an errorless None
 #[cfg(feature = "serde_json")]
 impl<T: Default> Default for ZCLazyValue<T> {
     fn default() -> Self {
         Self {
             raw: ZCRawValue::default(),
-            value: OnceLock::from(Ok(Some(T::default()))),
+            value: OnceLock::from(Ok(None)),
         }
     }
 }
