@@ -1004,7 +1004,7 @@ impl<T: for<'de> Deserialize<'de> + Hash> Hash for ZCLazyValue<T> {
 
 // default is an errorless None
 #[cfg(feature = "serde_json")]
-impl<T: Default> Default for ZCLazyValue<T> {
+impl<T> Default for ZCLazyValue<T> {
     fn default() -> Self {
         Self {
             raw: ZCRawValue::default(),
