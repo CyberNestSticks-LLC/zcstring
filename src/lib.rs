@@ -852,7 +852,8 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// const EMPTY: ZCString = ZCString::new();
 /// let json: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, 2,  3]}"));
-/// #[derive(serde::Deserialize, serde::Serialize)]
+///
+/// #[derive(serde::Deserialize, serde::Serialize, Debug)]
 /// struct X {
 ///     a: ZCString,
 ///    #[serde(default, skip_serializing_if = "ZCLazyValue::is_default")]
@@ -860,7 +861,7 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// }
 ///
 /// let x: X = serde_json_from_zcstring(json)?;
-/// assert_eq!(x.c.raw(), "[1, 2,  3]");
+/// assert_eq!(x.c.raw().map(|v| v.as_str()), Some("[1, 2,  3]"));
 /// assert!(!x.c.decoded());
 /// assert_eq!(x.c.value().unwrap().as_slice(), [1, 2, 3]);
 /// assert!(x.c.decoded());
@@ -868,12 +869,12 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// // bad JSON
 /// let json2: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, \"BAD\", 3]}"));
 /// let x2: X = serde_json_from_zcstring(json2)?;
-/// assert!(x2.c.value().is_none());
+/// assert!(x2.c.value().is_err());
 ///
 /// // JSON with missing "c"
 /// let json3: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\"}"));
 /// let x3: X = serde_json_from_zcstring(json3)?;
-/// assert!(x3.c.value().is_none());
+/// assert!(x3.c.is_default());
 /// let x3d = serde_json::to_string(&x3)?;
 /// assert_eq!(x3d, "{\"a\":\"b\"}");
 ///
@@ -881,42 +882,40 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// # }
 /// ```
 #[cfg(feature = "serde_json")]
+#[derive(Clone)]
 pub struct ZCLazyValue<T> {
-    raw: ZCRawValue,
-    // The inner Option<T> is logically redundant but allows return of
-    // a clean &Option<T> return
-    value: OnceLock<Result<Option<T>, Arc<serde_json::Error>>>,
+    raw: Option<ZCRawValue>,
+    value: OnceLock<Result<Arc<T>, Arc<serde_json::Error>>>,
 }
 
 #[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de>> ZCLazyValue<T> {
     // our raw ZCString
-    pub fn raw(&self) -> &ZCString {
-        self.raw.value()
+    pub fn raw(&self) -> Option<&ZCString> {
+        self.raw.as_ref().map(|v| v.value())
     }
 
     // internal call to OnceLock
-    fn get_or_init(&self) -> &Result<Option<T>, Arc<serde_json::Error>> {
+    fn get_or_init(&self) -> &Result<Arc<T>, Arc<serde_json::Error>> {
         self.value
             .get_or_init(|| {
-                match serde_json_from_zcstring(self.raw.value().clone()) {
-                    Ok(t) => Ok(Some(t)),
-                    Err(e) => Err(Arc::new(e)),
+                match &self.raw {
+                    Some(raw) =>
+                        match serde_json_from_zcstring(raw.value().clone()) {
+                            Ok(t) => Ok(Arc::new(t)),
+                            Err(e) => Err(Arc::new(e)),
+                        }
+
+                    // we shouldn't get here, but better to handle it sensibly
+                    None => Err(Arc::new(
+                        serde::de::Error::custom("ZCLazyValue raw string is None"))),
                 }
             })
     }
 
-    // value as a Result, Ok(t) if successfully decoded
-    pub fn try_value(&self) -> Result<&Option<T>, &Arc<serde_json::Error>> {
-        self.get_or_init().as_ref()
-    }
-
     // value as an option, Some(t) on successful decode
-    pub fn value(&self) -> Option<&T> {
-        match self.get_or_init() {
-            Ok(t) => t.as_ref(),
-            Err(_) => None,
-        }
+    pub fn value(&self) -> Result<&Arc<T>, &Arc<serde_json::Error>> {
+        self.get_or_init().as_ref()
     }
 
     // return true if the value has been decoded
@@ -924,14 +923,8 @@ impl<T: for<'de> Deserialize<'de>> ZCLazyValue<T> {
         self.value.get().is_some()
     }
     
-    // return true if the value is defaulted
     pub fn is_default(&self) -> bool {
-        match self.value.get() {
-            // This is a default construct
-            Some(Ok(None)) => true,
-            // Not default
-            _ => false,
-        }
+        self.raw.is_none()
     }
 }
 
@@ -941,9 +934,9 @@ impl<'de, T> Deserialize<'de> for ZCLazyValue<T> {
     where
         D: Deserializer<'de>,
     {
-        let raw: ZCRawValue = 
-            Deserialize::deserialize(deserializer)?;
-            
+        let raw: Option<ZCRawValue> = 
+            Some(Deserialize::deserialize(deserializer)?);
+
         // now deserialize the data component from our raw string
         // raw is a substring of our data source, we don't need
         // to re-specify it.
@@ -968,22 +961,10 @@ impl<T: Serialize> Serialize for ZCLazyValue<T> {
 #[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de> + Debug> fmt::Debug for ZCLazyValue<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.try_value(), f)
-    }
-}
-
-#[cfg(feature = "serde_json")]
-impl<T> Clone for ZCLazyValue<T> {
-    fn clone(&self) -> Self {
-         match self.value.get() {
-             // This is a default construct
-             Some(Ok(None)) => Self::default(),
-             // Otherwise clone the raw string
-             _ => Self {
-                raw: self.raw.clone(),
-                value: OnceLock::new(),
-            }
-        }
+        f.debug_struct("ZCLazyValue")
+            .field("raw", &self.raw)
+            .field("value", &self.value)
+            .finish()
     }
 }
 
@@ -992,8 +973,11 @@ impl<T: for<'de> Deserialize<'de> + PartialEq> PartialEq for ZCLazyValue<T> {
     fn eq(&self, other: &Self) -> bool {
         match (self.value(), other.value()) {
             // compare decoded contents
-            (Some(a), Some(b)) => a.eq(b),
-            // treat as None vs None
+            (Ok(a), Ok(b)) => a.eq(b),
+            // error vs. non error is fale
+            (Ok(_), _) => false,
+            (_, Ok(_)) => false,
+            // treat all error values as equal
             _ => true,
         }
     }
@@ -1007,7 +991,11 @@ impl<T: for<'de> Deserialize<'de> + PartialOrd> PartialOrd for ZCLazyValue<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self.value(), other.value()) {
             // compare decoded contents
-            (Some(a), Some(b)) => a.partial_cmp(b),
+            (Ok(a), Ok(b)) => a.partial_cmp(b),
+            // value > error
+            (Ok(_), _) => Some(Ordering::Greater),
+            (_, Ok(_)) => Some(Ordering::Less),
+            // treat all error values as equal
             _ => Some(Ordering::Equal),
         }
     }
@@ -1019,8 +1007,11 @@ impl<T: for<'de> Deserialize<'de> + Ord> Ord for ZCLazyValue<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self.value(), other.value()) {
             // compare decoded contents
-            (Some(a), Some(b)) => a.cmp(b),
-            // treat like comparison of None == None
+            (Ok(a), Ok(b)) => a.cmp(b),
+            // value > error
+            (Ok(_), _) => Ordering::Greater,
+            (_, Ok(_)) => Ordering::Less,
+            // treat all error values as equal
             _ => Ordering::Equal,
         }
     }
@@ -1030,7 +1021,7 @@ impl<T: for<'de> Deserialize<'de> + Ord> Ord for ZCLazyValue<T> {
 impl<T: for<'de> Deserialize<'de> + Hash> Hash for ZCLazyValue<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.value() {
-            Some(v) => {
+            Ok(v) => {
                 1_u8.hash(state);
                 v.hash(state)
             },
@@ -1042,17 +1033,12 @@ impl<T: for<'de> Deserialize<'de> + Hash> Hash for ZCLazyValue<T> {
     }
 }
 
-// default is an errorless None
-// To correctly omit the field rather than serializing to null
-// use the following
-// #[serde(default, skip_serializing_if = "ZCLazyValue::is_default")]
 #[cfg(feature = "serde_json")]
-impl<T> Default for ZCLazyValue<T> {
+impl<T: Default> Default for ZCLazyValue<T> {
     fn default() -> Self {
-        let n: ZCString = literal!("null").into();
         Self {
-            raw: ZCRawValue(n),
-            value: OnceLock::from(Ok(None)),
+            raw: None,
+            value: OnceLock::from(Ok(Arc::new(T::default()))),
         }
     }
 }
