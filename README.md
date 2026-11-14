@@ -40,10 +40,11 @@ this by:
 
 Add this to your `Cargo.toml`:
 
-```toml
-[dependencies]
-# by default the std and serde features are enable
-zcstring = "0.4.0"
-
 ## Example code
 cargo run --example json_example
+
+```toml
+[dependencies]
+# by default the serde feature is enable
+zcstring = "0.4.0"
+

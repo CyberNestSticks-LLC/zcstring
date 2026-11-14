@@ -6,7 +6,7 @@
 // except according to those terms.
 
 // Author: Lawrence (Larry) Foard
-#[cfg(all(feature = "serde_json", feature = "std"))]
+#[cfg(all(feature = "serde_json"))]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

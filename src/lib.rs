@@ -20,13 +20,12 @@
 //! - **RAII Guards**: Provides a [`SourceGuard`] to safely manage the lifecycle of the
 //!   thread-local source.
 //! - **Serde Integration**: Optional (defaults to on) support for efficient
-//!   zero-copy deserialization via the `serde` feature flag.
+//!   zero-copy deserialization via the `serde_json` feature flag.
 //!
 //! ## Crate Features
 //!
-//! * **`default`** By default, serde and std are enabled.
-//! * **`serde`** (Optional): Enables serialization and deserialization support via `serde` and `serde_json`.
-//! * **`std`** (Optional): Enables `From<String>` implementations.
+//! * **`default`** By default, serde_json is enabled.
+//! * **`serde_json`** (Optional): Enables serialization and deserialization support via `serde` and `serde_json`.
 //! ## serde_json example
 //!
 //! ```rust
@@ -62,20 +61,21 @@ pub use arcstr::{literal, literal_substr};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[cfg(feature = "serde_json")]
 use serde::de::{DeserializeOwned};
+#[cfg(feature = "serde_json")]
 use serde::ser::Error;
+#[cfg(feature = "serde_json")]
 use serde_json::value::RawValue;
-use std::cell::RefCell;
+use core::cell::RefCell;
 #[cfg(feature = "serde_json")]
 use std::cmp::Ordering;
 #[cfg(feature = "serde_json")]
 use std::fmt::{self, Debug};
 #[cfg(feature = "serde_json")]
 use std::hash::{Hash, Hasher};
-#[cfg(feature = "std")]
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
-#[cfg(feature = "std")]
-use std::ops::{Bound, RangeBounds};
+use core::ops::{Bound, RangeBounds};
+#[cfg(feature = "serde_json")]
 use std::sync::{Arc, OnceLock};
 
 
@@ -85,8 +85,7 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
-// error for File, Read and Seek operations
-#[cfg(feature = "std")]
+/// error for File, Read and Seek operations
 #[derive(thiserror::Error, Debug)]
 pub enum ReaderError {
     #[error("Invalid range: start {start} is greater than end {end}")]
@@ -110,7 +109,7 @@ impl ZCString {
         ZCString(literal_substr!(""))
     }
 
-    /// short hand to wrap literal_substr!("...")
+    /// Shorthand to wrap literal_substr!("...")
     pub const fn l(v: Substr) -> Self {
         ZCString(v)
     }
@@ -145,11 +144,11 @@ impl ZCString {
     /// assert!(root.source_of(sub));
     /// ```
     pub fn source_of(&self, s: &str) -> bool {
-        if let Some(offset) = (s.as_ptr() as usize).checked_sub(self.0.as_ptr() as usize) {
-            // do we fall within?
-            offset < self.0.len()
+        let self_start = self.0.as_ptr() as usize;
+        let s_start = s.as_ptr() as usize;
+        if let Some(offset) = s_start.checked_sub(self_start) {
+            offset.checked_add(s.len()).is_some_and(|end| end <= self.0.len())
         } else {
-            // we fall below the source
             false
         }
     }
@@ -157,8 +156,12 @@ impl ZCString {
     /// Creates a `ZCString` that uses a substr of the
     /// current `ZCString` if possible, otherwise allocate
     pub fn from_substr(&self, s: &str) -> Self {
-        match (s.as_ptr() as usize).checked_sub(self.0.as_ptr() as usize) {
-            Some(offset) if offset < self.0.len() => self.substr(offset..offset + s.len()),
+        let self_start = self.0.as_ptr() as usize;
+        let s_start = s.as_ptr() as usize;
+        match s_start.checked_sub(self_start) {
+            Some(offset) if offset.checked_add(s.len()).is_some_and(|end| end <= self.0.len()) => {
+                self.substr(offset..offset + s.len())
+            }
             _ => ZCString::from_str_without_source(s),
         }
     }
@@ -291,8 +294,7 @@ impl ZCString {
         }
     }
 
-    #[cfg(feature = "std")]
-    /// Create a ZCString by reading a range of bytes from a
+    /// Create a ZCString by reading a range of bytes from
     /// an object supporting Read and Seek traits. The range must
     /// contain valid UTF-8
     ///
@@ -316,47 +318,73 @@ impl ZCString {
         R: RangeBounds<u64>,
     {
         let start_pos = match range.start_bound() {
-            Bound::Included(s) => *s,
-            Bound::Excluded(s) => *s + 1,
-            Bound::Unbounded => input.stream_position()?,
+            Bound::Included(&s) => Some(s),
+            Bound::Excluded(&s) => s.checked_add(1),
+            Bound::Unbounded => Some(input.stream_position()?),
         };
 
         let end_pos = match range.end_bound() {
-            Bound::Included(e) => *e + 1,
-            Bound::Excluded(e) => *e,
-            Bound::Unbounded => input.seek(SeekFrom::End(0))?,
+            Bound::Included(&e) => e.checked_add(1),
+            Bound::Excluded(&e) => Some(e),
+            Bound::Unbounded => Some(input.seek(SeekFrom::End(0))?),
+        };
+
+        let (Some(start_pos), Some(end_pos)) = (start_pos, end_pos) else {
+            return Err(ReaderError::InvalidRange {
+                start: start_pos.unwrap_or(u64::MAX),
+                end: end_pos.unwrap_or(u64::MAX),
+            });
         };
 
         if start_pos > end_pos {
-            // error
             return Err(ReaderError::InvalidRange {
                 start: start_pos,
                 end: end_pos,
             });
         }
 
-        if start_pos == end_pos {
-            // edge case
+        let stream_len = match range.end_bound() {
+            Bound::Unbounded => end_pos,
+            _ => input.seek(SeekFrom::End(0))?,
+        };
+
+        if end_pos > stream_len {
+            return Err(ReaderError::InvalidRange {
+                start: start_pos,
+                end: end_pos,
+            });
+        }
+
+        let len = end_pos - start_pos;
+        if len == 0 {
             return Ok(ZCString::new());
         }
 
+        let len = usize::try_from(len).map_err(|_| ReaderError::InvalidRange {
+            start: start_pos,
+            end: end_pos,
+        })?;
+
+        input.seek(SeekFrom::Start(start_pos))?;
+
         let mut io_error = Ok(());
 
-        let result = ArcStr::init_with((end_pos - start_pos) as usize, |buffer| {
+        let result = ArcStr::init_with(len, |buffer| {
             io_error = (|| -> Result<(), std::io::Error> {
                 input.seek(SeekFrom::Start(start_pos))?;
                 input.read_exact(buffer)?;
                 Ok(())
             })()
-        })?;
+        });
 
-        match io_error {
-            Ok(()) => Ok(ZCString::from(result)),
-            Err(e) => Err(e)?,
+        // deal with one of two error sources, I/O errors take priority
+        match (io_error, result) {
+            (Ok(()), Ok(result)) => Ok(ZCString::from(result)),
+            (Err(e), _) => Err(e)?,
+            (_, Err(e)) => Err(e)?,
         }
     }
 
-    #[cfg(feature = "std")]
     /// Create a ZCString by reading bytes from an object supporting the Read trait.
     /// The bytes must be valid UTF-8
     ///
@@ -390,7 +418,6 @@ impl ZCString {
         }
     }
 
-    #[cfg(feature = "std")]
     /// Create a ZCString by reading an entire file
     ///
     /// ### Arguments
@@ -437,14 +464,12 @@ impl PartialEq<ZCString> for &str {
     }
 }
 
-#[cfg(feature = "std")]
 impl PartialEq<String> for ZCString {
     fn eq(&self, other: &String) -> bool {
         self.0 == *other
     }
 }
 
-#[cfg(feature = "std")]
 impl PartialEq<ZCString> for String {
     fn eq(&self, other: &ZCString) -> bool {
         *self == other.0
@@ -499,7 +524,6 @@ impl From<ArcStr> for ZCString {
     }
 }
 
-#[cfg(feature = "std")]
 impl From<String> for ZCString {
     #[inline]
     fn from(s: String) -> Self {
@@ -608,7 +632,7 @@ where
 }
 
 /// ZCRawValue serde type that contains an internal ZCString
-/// allows convient retrieval of raw JSON 
+/// allows convenient retrieval of raw JSON
 ///
 /// ```
 /// # use zcstring::{ZCRawValue, ZCString, serde_json_from_zcstring};
@@ -630,7 +654,12 @@ where
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ZCRawValue(ZCString);
 
+#[cfg(feature = "serde_json")]
 impl ZCRawValue {
+    pub fn new(v: ZCString) -> Self {
+        ZCRawValue(v)
+    }
+
     pub fn value(&self) -> &ZCString {
         &self.0
     }
@@ -697,7 +726,7 @@ pub struct ZCRawValueAnd<T> {
 #[cfg(feature = "serde_json")]
 impl<T> ZCRawValueAnd<T> {
     pub fn raw(&self) -> &ZCString {
-        &self.raw.value()
+        self.raw.value()
     }
 
     pub fn value(&self) -> &T {
@@ -822,29 +851,31 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// # use arcstr::literal_substr;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// const EMPTY: ZCString = ZCString::new();
-/// const json: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, 2,  3]}"));
-/// #[derive(serde::Deserialize)]
+/// let json: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, 2,  3]}"));
+/// #[derive(serde::Deserialize, serde::Serialize)]
 /// struct X {
 ///     a: ZCString,
-///     #[serde(default)]
+///    #[serde(default, skip_serializing_if = "ZCLazyValue::is_default")]
 ///     c: ZCLazyValue<Vec<u32>>,
 /// }
 ///
 /// let x: X = serde_json_from_zcstring(json)?;
 /// assert_eq!(x.c.raw(), "[1, 2,  3]");
 /// assert!(!x.c.decoded());
-/// assert_eq!(x.c.as_ref().unwrap().as_slice(), [1, 2, 3]);
+/// assert_eq!(x.c.value().unwrap().as_slice(), [1, 2, 3]);
 /// assert!(x.c.decoded());
 ///
 /// // bad JSON
-/// const json2: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, \"BAD\", 3]}"));
+/// let json2: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\", \"c\":[1, \"BAD\", 3]}"));
 /// let x2: X = serde_json_from_zcstring(json2)?;
-/// assert!(x2.c.as_ref().is_none());
+/// assert!(x2.c.value().is_none());
 ///
 /// // JSON with missing "c"
-/// const json3: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\"}"));
+/// let json3: ZCString = ZCString::l(literal_substr!("{\"a\": \"b\"}"));
 /// let x3: X = serde_json_from_zcstring(json3)?;
-/// assert!(x3.c.as_ref().is_none());
+/// assert!(x3.c.value().is_none());
+/// let x3d = serde_json::to_string(&x3)?;
+/// assert_eq!(x3d, "{\"a\":\"b\"}");
 ///
 /// # Ok(())
 /// # }
@@ -852,7 +883,7 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 #[cfg(feature = "serde_json")]
 pub struct ZCLazyValue<T> {
     raw: ZCRawValue,
-    // inner Option<T> is logically redundant but allows return of
+    // The inner Option<T> is logically redundant but allows return of
     // a clean &Option<T> return
     value: OnceLock<Result<Option<T>, Arc<serde_json::Error>>>,
 }
@@ -861,7 +892,7 @@ pub struct ZCLazyValue<T> {
 impl<T: for<'de> Deserialize<'de>> ZCLazyValue<T> {
     // our raw ZCString
     pub fn raw(&self) -> &ZCString {
-        &self.raw.value()
+        self.raw.value()
     }
 
     // internal call to OnceLock
@@ -881,10 +912,10 @@ impl<T: for<'de> Deserialize<'de>> ZCLazyValue<T> {
     }
 
     // value as an option, Some(t) on successful decode
-    pub fn value(&self) -> &Option<T> {
+    pub fn value(&self) -> Option<&T> {
         match self.get_or_init() {
-            Ok(t) => t,
-            Err(_) => &None,
+            Ok(t) => t.as_ref(),
+            Err(_) => None,
         }
     }
 
@@ -892,14 +923,15 @@ impl<T: for<'de> Deserialize<'de>> ZCLazyValue<T> {
     pub fn decoded(&self) -> bool {
         self.value.get().is_some()
     }
-}
-
-#[cfg(feature = "serde_json")]
-impl<T: for<'de> Deserialize<'de>> Deref for ZCLazyValue<T> {
-    type Target = Option<T>;
-
-    fn deref(&self) -> &Option<T> {
-        self.value()
+    
+    // return true if the value is defaulted
+    pub fn is_default(&self) -> bool {
+        match self.value.get() {
+            // This is a default construct
+            Some(Ok(None)) => true,
+            // Not default
+            _ => false,
+        }
     }
 }
 
@@ -941,11 +973,16 @@ impl<T: for<'de> Deserialize<'de> + Debug> fmt::Debug for ZCLazyValue<T> {
 }
 
 #[cfg(feature = "serde_json")]
-impl<T: Clone> Clone for ZCLazyValue<T> {
+impl<T> Clone for ZCLazyValue<T> {
     fn clone(&self) -> Self {
-        Self {
-            raw: self.raw.clone(),
-            value: OnceLock::new(),
+         match self.value.get() {
+             // This is a default construct
+             Some(Ok(None)) => Self::default(),
+             // Otherwise clone the raw string
+             _ => Self {
+                raw: self.raw.clone(),
+                value: OnceLock::new(),
+            }
         }
     }
 }
@@ -956,8 +993,8 @@ impl<T: for<'de> Deserialize<'de> + PartialEq> PartialEq for ZCLazyValue<T> {
         match (self.value(), other.value()) {
             // compare decoded contents
             (Some(a), Some(b)) => a.eq(b),
-            // compare >>non canonicalized<< raw strings
-            _ => self.raw().eq(other.raw()),
+            // treat as None vs None
+            _ => true,
         }
     }
 }
@@ -971,8 +1008,7 @@ impl<T: for<'de> Deserialize<'de> + PartialOrd> PartialOrd for ZCLazyValue<T> {
         match (self.value(), other.value()) {
             // compare decoded contents
             (Some(a), Some(b)) => a.partial_cmp(b),
-            // compare >>non canonicalized<< raw strings
-            _ => self.raw().partial_cmp(other.raw()),
+            _ => Some(Ordering::Equal),
         }
     }
 }
@@ -984,8 +1020,8 @@ impl<T: for<'de> Deserialize<'de> + Ord> Ord for ZCLazyValue<T> {
         match (self.value(), other.value()) {
             // compare decoded contents
             (Some(a), Some(b)) => a.cmp(b),
-            // compare >>non canonicalized<< raw strings
-            _ => self.raw().cmp(other.raw()),
+            // treat like comparison of None == None
+            _ => Ordering::Equal,
         }
     }
 }
@@ -994,20 +1030,28 @@ impl<T: for<'de> Deserialize<'de> + Ord> Ord for ZCLazyValue<T> {
 impl<T: for<'de> Deserialize<'de> + Hash> Hash for ZCLazyValue<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.value() {
-            // hash decoded contents
-            Some(v) => v.hash(state),
-            // hash >>non canonicalized<< raw string
-            _ => self.raw().hash(state),
+            Some(v) => {
+                1_u8.hash(state);
+                v.hash(state)
+            },
+
+            _ => {
+                0_u8.hash(state)
+            }
         }
     }
 }
 
 // default is an errorless None
+// To correctly omit the field rather than serializing to null
+// use the following
+// #[serde(default, skip_serializing_if = "ZCLazyValue::is_default")]
 #[cfg(feature = "serde_json")]
 impl<T> Default for ZCLazyValue<T> {
     fn default() -> Self {
+        let n: ZCString = literal!("null").into();
         Self {
-            raw: ZCRawValue::default(),
+            raw: ZCRawValue(n),
             value: OnceLock::from(Ok(None)),
         }
     }

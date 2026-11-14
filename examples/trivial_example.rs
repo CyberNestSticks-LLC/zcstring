@@ -13,9 +13,7 @@ use zcstring::ZCString;
 fn main() {
     // ZCString creation examples
     println!("From str: {:?}", ZCString::from("str"));
-    #[cfg(feature = "std")]
     println!("From String: {:?}", ZCString::from(String::from("str")));
-    #[cfg(feature = "std")]
     println!("String::from(\"a\") == ZCString::from(\"a\"): {:?}", 
         String::from("a") == ZCString::from("a"));
     println!("New ZCString: {:?}", ZCString::new());

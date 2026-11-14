@@ -8,26 +8,21 @@ license = "MIT OR Apache-2.0"
 name = "zcstring"
 readme = "README.md"
 repository = "https://github.com/CyberNestSticks-LLC/zcstring.git"
-rust-version = "1.68"
-version = "0.4.2"
+rust-version = "1.79"
+version = "0.4.3"
 
 [dependencies]
-arcstr = { version = "1.2", default-features = false, features = ["substr"] }
+arcstr = { version = "1.2", default-features = false, features = ["substr", "std"] }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true, features = ["raw_value"]}
 thiserror = "2.0"
 
 [features]
-## Enables integration with the Rust standard library, 
-## specifically for `String` conversions.
-std = ["arcstr/std"]
-
 ## Enables support for `serde` serialization and deserialization, 
 ## including specialized `serde_json` integration.
 serde_json = ["arcstr/serde", "dep:serde", "dep:serde_json"]
 
-## Enable std and serde_json by default
-default = ["std", "serde_json"]
+default = ["serde_json"]
 
 [package.metadata.docs.rs]
 all-features = true
