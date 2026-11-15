@@ -19,8 +19,6 @@
 //!   is actually a sub-slice of an existing managed string.
 //! - **RAII Guards**: Provides a [`SourceGuard`] to safely manage the lifecycle of the
 //!   thread-local source.
-//! - **Serde Integration**: Optional (defaults to on) support for efficient
-//!   zero-copy deserialization via the `serde_json` feature flag.
 //!
 //! ## Crate Features
 //!
@@ -57,28 +55,19 @@ use arcstr::{ArcStr, Substr};
 
 // re-export
 pub use arcstr::{literal, literal_substr};
-#[cfg(feature = "serde_json")]
 use log::error;
-#[cfg(feature = "serde_json")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-#[cfg(feature = "serde_json")]
 use serde::de::{DeserializeOwned};
-#[cfg(feature = "serde_json")]
 use serde::ser::Error;
-#[cfg(feature = "serde_json")]
 use serde_json::value::RawValue;
 use core::cell::RefCell;
-#[cfg(feature = "serde_json")]
 use std::cmp::Ordering;
-#[cfg(feature = "serde_json")]
 use std::fmt::{self, Debug};
-#[cfg(feature = "serde_json")]
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use core::ops::{Bound, RangeBounds};
-#[cfg(feature = "serde_json")]
 use std::sync::{Arc, OnceLock};
 
 thread_local! {
@@ -101,8 +90,7 @@ pub enum ReaderError {
 }
 
 /// ZCString wrapper struct
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde_json", derive(Serialize))]
+#[derive(Clone, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ZCString(Substr);
 
 impl ZCString {
@@ -219,14 +207,14 @@ impl ZCString {
     /// let source = ZCString::from("1 23 456 789 0");
     ///
     /// // Call a lambda function with our thread local storage
-    /// // set to zc
+    /// // set to source
     /// let result = ZCString::with_source(source, |source| {
     ///     // make it clear we are working with an &str
     ///     // borrowed from source
     ///     let s: &str = &source;
     ///     s
     ///         .split(' ')
-    ///         // ZCString::from(v: &str) checks does &str lives in source?
+    ///         // ZCString::from(v: &str) checks does &str live in source?
     ///         .map(|v| ZCString::from(v))
     ///         // do we really point back to source?
     ///         .for_each(|v| assert!(source.source_of(&v)));
@@ -326,7 +314,7 @@ impl ZCString {
         let start_pos = match range.start_bound() {
             Bound::Included(&s) => Some(s),
             Bound::Excluded(&s) => s.checked_add(1),
-            Bound::Unbounded => Some(input.stream_position()?),
+            Bound::Unbounded => Some(0),
         };
 
         let end_pos = match range.end_bound() {
@@ -371,8 +359,6 @@ impl ZCString {
             end: end_pos,
         })?;
 
-        input.seek(SeekFrom::Start(start_pos))?;
-
         let mut io_error = Ok(());
 
         let result = ArcStr::init_with(len, |buffer| {
@@ -403,12 +389,12 @@ impl ZCString {
     /// // as if coming from a File
     /// let mut data = Cursor::new(b"Cats and dogs");
     /// // read "and" from 'data'
-    /// let mut r = ZCString::read(&mut data, 4)?;
+    /// let mut r = ZCString::read_exact(&mut data, 4)?;
     /// assert_eq!(r, "Cats");
     /// # Ok(())
     /// # }
     /// ```
-    pub fn read<I: Read>(input: &mut I, bytes: usize) -> Result<ZCString, ReaderError> {
+    pub fn read_exact<I: Read>(input: &mut I, bytes: usize) -> Result<ZCString, ReaderError> {
         let mut io_error = Ok(());
 
         let result = ArcStr::init_with(bytes, |buffer| {
@@ -450,7 +436,7 @@ impl ZCString {
 
 impl Default for ZCString {
     fn default() -> Self {
-        ZCString::from(literal!(""))
+        Self::new()
     }
 }
 
@@ -468,7 +454,7 @@ impl PartialEq<&str> for ZCString {
 
 impl PartialEq<ZCString> for str {
     fn eq(&self, other: &ZCString) -> bool {
-        self == other
+        self == other.as_str()
     }
 }
 
@@ -571,7 +557,6 @@ impl Drop for SourceGuard {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<'de> Deserialize<'de> for ZCString {
     /// Custom deserializer that attempts to borrow from the thread-local source
     /// when encountering a string.
@@ -605,13 +590,12 @@ impl<'de> Deserialize<'de> for ZCString {
                 Ok(ZCString::from_str_with_source(s))
             }
 
-            // build an arcstr::Substr based on the full ArcStr of our
-            // decoded string
+            // build a ZCString copying from String s
             fn visit_string<E>(self, s: String) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                self.visit_str(s.as_str())
+                Ok(ZCString::from_str_without_source(s.as_str()))
             }
         }
 
@@ -623,8 +607,6 @@ impl<'de> Deserialize<'de> for ZCString {
 /// Parses a JSON string into type `T` while using the provided `ZCString` as
 /// the context for any zero-copy deserialization.
 ///
-/// **Requires the `serde` feature.**
-#[cfg(feature = "serde_json")]
 pub fn serde_json_from_zcstring<T>(json: ZCString) -> Result<T, serde_json::Error>
 where
     T: for<'de> Deserialize<'de>,
@@ -674,11 +656,9 @@ where
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "serde_json")]
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ZCRawValue(ZCString);
 
-#[cfg(feature = "serde_json")]
 impl ZCRawValue {
     pub fn new(v: ZCString) -> Self {
         ZCRawValue(v)
@@ -693,14 +673,12 @@ impl ZCRawValue {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl std::fmt::Debug for ZCRawValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.0.as_str(), f)
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<'de> Deserialize<'de> for ZCRawValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -713,7 +691,6 @@ impl<'de> Deserialize<'de> for ZCRawValue {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl Serialize for ZCRawValue {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -745,16 +722,14 @@ impl Serialize for ZCRawValue {
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "serde_json")]
 pub struct ZCRawValueAnd<T> {
     raw: ZCRawValue,
     decoded: T,
 }
 
-#[cfg(feature = "serde_json")]
-impl<'de, T: DeserializeOwned> ZCRawValueAnd<T> {
+impl<T: DeserializeOwned> ZCRawValueAnd<T> {
     /// Build from a ZCString
-    pub fn new(raw: ZCString) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(raw: ZCString) -> Result<Self, serde_json::Error> {
         Ok(Self {
             decoded: serde_json_from_zcstring(raw.clone())?,
             raw: ZCRawValue(raw),
@@ -774,7 +749,6 @@ impl<'de, T: DeserializeOwned> ZCRawValueAnd<T> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T> Deref for ZCRawValueAnd<T> {
     type Target = T;
 
@@ -783,7 +757,6 @@ impl<T> Deref for ZCRawValueAnd<T> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<'de, T: DeserializeOwned> Deserialize<'de> for ZCRawValueAnd<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -796,7 +769,7 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for ZCRawValueAnd<T> {
         // raw is a substring of our data source, we don't need
         // to re-specify it.
         let decoded =
-            serde_json::from_str(raw.value().as_str())
+            serde_json_from_zcstring(raw.value().clone())
             .map_err(serde::de::Error::custom)?;
 
         Ok(ZCRawValueAnd {
@@ -806,7 +779,6 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for ZCRawValueAnd<T> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T> Serialize for ZCRawValueAnd<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -817,7 +789,6 @@ impl<T> Serialize for ZCRawValueAnd<T> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: fmt::Debug> fmt::Debug for ZCRawValueAnd<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ZCRawValueAnd")
@@ -827,14 +798,12 @@ impl<T: fmt::Debug> fmt::Debug for ZCRawValueAnd<T> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: fmt::Display> fmt::Display for ZCRawValueAnd<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.decoded, f)
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: Clone> Clone for ZCRawValueAnd<T> {
     fn clone(&self) -> Self {
         Self {
@@ -844,24 +813,20 @@ impl<T: Clone> Clone for ZCRawValueAnd<T> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: PartialEq> PartialEq for ZCRawValueAnd<T> {
     fn eq(&self, other: &Self) -> bool {
         self.decoded.eq(&other.decoded)
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: Eq> Eq for ZCRawValueAnd<T> {}
 
-#[cfg(feature = "serde_json")]
 impl<T: PartialOrd> PartialOrd for ZCRawValueAnd<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.decoded.partial_cmp(&other.decoded)
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: Ord> Ord for ZCRawValueAnd<T> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
@@ -869,14 +834,12 @@ impl<T: Ord> Ord for ZCRawValueAnd<T> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: Hash> Hash for ZCRawValueAnd<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.decoded.hash(state);
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: Default> Default for ZCRawValueAnd<T> {
     fn default() -> Self {
         Self {
@@ -933,14 +896,12 @@ impl<T: Default> Default for ZCRawValueAnd<T> {
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "serde_json")]
 #[derive(Clone)]
 pub struct ZCLazyValue<T, const L: bool = false> {
     raw: Option<ZCRawValue>,
     decoded: OnceLock<Result<Arc<T>, Arc<serde_json::Error>>>,
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de>, const L: bool> ZCLazyValue<T, L> {
     /// construct from ZCString, will lazy decode
     pub fn from_raw(raw: ZCString) -> Self {
@@ -950,7 +911,7 @@ impl<T: for<'de> Deserialize<'de>, const L: bool> ZCLazyValue<T, L> {
         }
     }
 
-    /// construct from Arc<T> (treated as a default value!)
+    /// construct from `Arc<T>` (treated as a default value!)
     pub fn from_value(t: Arc<T>) -> Self {
         Self {
             raw: None,
@@ -1010,7 +971,6 @@ impl<T: for<'de> Deserialize<'de>, const L: bool> ZCLazyValue<T, L> {
     }    
 }
 
-#[cfg(feature = "serde_json")]
 impl<'de, T, const L: bool> Deserialize<'de> for ZCLazyValue<T, L> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -1029,7 +989,6 @@ impl<'de, T, const L: bool> Deserialize<'de> for ZCLazyValue<T, L> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de> + Serialize, const L: bool> Serialize for ZCLazyValue<T, L> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -1048,7 +1007,6 @@ impl<T: for<'de> Deserialize<'de> + Serialize, const L: bool> Serialize for ZCLa
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: Debug, const L: bool> fmt::Debug for ZCLazyValue<T, L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ZCLazyValue")
@@ -1058,13 +1016,12 @@ impl<T: Debug, const L: bool> fmt::Debug for ZCLazyValue<T, L> {
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de> + PartialEq, const L: bool> PartialEq for ZCLazyValue<T, L> {
     fn eq(&self, other: &Self) -> bool {
         match (self.value(), other.value()) {
             // compare decoded contents
             (Ok(a), Ok(b)) => a.eq(b),
-            // error vs. non error is fale
+            // error vs. non error is false
             (Ok(_), _) => false,
             (_, Ok(_)) => false,
             // treat all error values as equal
@@ -1073,10 +1030,8 @@ impl<T: for<'de> Deserialize<'de> + PartialEq, const L: bool> PartialEq for ZCLa
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de> + Eq, const L: bool> Eq for ZCLazyValue<T, L> {}
 
-#[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de> + PartialOrd, const L: bool> PartialOrd for ZCLazyValue<T, L> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self.value(), other.value()) {
@@ -1091,7 +1046,6 @@ impl<T: for<'de> Deserialize<'de> + PartialOrd, const L: bool> PartialOrd for ZC
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de> + Ord, const L: bool> Ord for ZCLazyValue<T, L> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
@@ -1107,7 +1061,6 @@ impl<T: for<'de> Deserialize<'de> + Ord, const L: bool> Ord for ZCLazyValue<T, L
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: for<'de> Deserialize<'de> + Hash, const L: bool> Hash for ZCLazyValue<T, L> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self.value() {
@@ -1123,7 +1076,6 @@ impl<T: for<'de> Deserialize<'de> + Hash, const L: bool> Hash for ZCLazyValue<T,
     }
 }
 
-#[cfg(feature = "serde_json")]
 impl<T: Default, const L: bool> Default for ZCLazyValue<T, L> {
     fn default() -> Self {
         Self {

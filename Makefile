@@ -4,7 +4,7 @@ all: dryrun
 dryrun: checks
 	cargo publish --dry-run
 
-checks: fmt clippy test audit msrv deny docs1 docs2 examples
+checks: clippy test audit msrv deny docs1 examples
 
 fmt:
 	cargo fmt

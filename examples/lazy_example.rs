@@ -8,11 +8,9 @@
 // Author: Lawrence (Larry) Foard
 
 use arcstr::literal;
-#[cfg(feature = "serde_json")]
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
-#[cfg(feature = "serde_json")]
 use zcstring::serde_json_from_zcstring;
 use zcstring::{ZCLazyValue, ZCString};
 
@@ -26,7 +24,7 @@ impl log::Log for OurLogger {
     fn flush(&self) {}
 }
 
-#[cfg_attr(feature = "serde_json", derive(Debug, Deserialize, Serialize))]
+#[derive(Debug, Deserialize, Serialize)]
 struct Extra {
     a: u32,
     b: ZCString,
@@ -34,8 +32,7 @@ struct Extra {
 
 // parse JSON containing borrowed pointers to ParsedLog::owner
 // and/or owned de-escapified data
-#[derive(Debug)]
-#[cfg_attr(feature = "serde_json", derive(Deserialize, Serialize))]
+#[derive(Debug, Deserialize, Serialize)]
 struct LogEntry {
     level: ZCString,
     message: ZCString,
@@ -62,7 +59,6 @@ fn show(label: &str, source: &str, s: &str) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    #[cfg(feature = "serde_json")]
     {
         log::set_logger(&OurLogger).unwrap();
         log::set_max_level(log::LevelFilter::Error);

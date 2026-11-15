@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 -- TBD
 
-## [0.3.0] - 2026-01-29
+## [0.3.0] - 2026-01-13
 ### Added
 
 - Support for efficient direct to ZCString file and Read trait reads

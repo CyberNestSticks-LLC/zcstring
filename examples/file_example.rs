@@ -6,7 +6,6 @@
 // except according to those terms.
 
 // Author: Lawrence (Larry) Foard
-#[cfg(all(feature = "serde_json"))]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -54,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .filter(|(_, data)| data.status == Status::Active)
         // k.clone() is zero-copy and still points back to 'data'
-        // as do CZStrings within State
+        // as do ZCStrings within State
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 

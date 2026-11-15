@@ -8,18 +8,15 @@
 // Author: Lawrence (Larry) Foard
 
 use arcstr::literal;
-#[cfg(feature = "serde_json")]
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
-#[cfg(feature = "serde_json")]
 use zcstring::serde_json_from_zcstring;
 use zcstring::{ZCRawValue, ZCString};
 
 // parse JSON containing borrowed pointers to ParsedLog::owner
 // and/or owned de-escapified data
-#[derive(Debug)]
-#[cfg_attr(feature = "serde_json", derive(Deserialize, Serialize))]
+#[derive(Debug, Deserialize, Serialize)]
 struct LogEntry {
     level: ZCString,
     message: ZCString,
@@ -27,12 +24,12 @@ struct LogEntry {
 }
 
 fn show(label: &str, source: &str, s: &str) {
-    println!("  Field: {}", label);
-    println!("    Value: {:?}", s);
+    println!("  Field: {label}");
+    println!("    Value: {s:?}");
 
     // memory position of s
     let s_start = s.as_ptr() as usize;
-    println!("    Address: 0x{:x}", s_start);
+    println!("    Address: 0x{s_start:x}");
 
     // bounds of source
     let source_start = source.as_ptr() as usize;
@@ -46,7 +43,6 @@ fn show(label: &str, source: &str, s: &str) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    #[cfg(feature = "serde_json")]
     {
         // example JSON data feed
         let input = [
